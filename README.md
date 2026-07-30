@@ -266,6 +266,12 @@ dart run example/goal_api_example.dart
 The live tests skip themselves without a key. Endpoint-by-endpoint coverage of the API
 lives in `tools/sweep.py` in the SDK workspace.
 
-## License
+## Licence
 
-MIT
+MIT. See [LICENSE](LICENSE).
+
+Runtime dependencies are `http`, `web_socket_channel` and `crypto`, all BSD-3-Clause and all
+published by the Dart team, so all permissive. Details in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Security issues: [SECURITY.md](SECURITY.md).
