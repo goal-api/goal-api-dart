@@ -10,6 +10,20 @@ Single source of truth for all five SDKs. Derived from the live service, not fro
 - WebSocket protocol (`services/websocket-service/src/handlers/messageRouter.js`, `subscriptionHandler.js`)
 - Webhook signing (`services/worker-service/src/services/webhookDeliveryService.js:22-67`)
 
+## Scope
+
+These SDKs cover the **customer data API** and nothing else. Every endpoint here is one a
+paying API customer calls with their key.
+
+The gateway also mounts a control plane for the SaaS itself: `/auth`, `/user`, `/api-keys`,
+`/sessions`, `/plans`, `/subscriptions`, `/webhook-endpoints`, `/admin`, and `/blog`. Those
+belong to the dashboard and the marketing site, most authenticate with a dashboard JWT
+rather than an API key, and none of them are useful to someone building against the API.
+They are deliberately absent, and should stay absent.
+
+The one non-football path included is `POST /v1/ws/token`, because a browser needs it to
+open the live socket without exposing the API key.
+
 ## Transport
 
 | | |
