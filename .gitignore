@@ -1,0 +1,4 @@
+.dart_tool/
+build/
+# A library should not pin its consumers' resolutions.
+pubspec.lock
