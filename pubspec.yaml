@@ -1,0 +1,26 @@
+name: goal_api
+description: Dart SDK for the GOAL API - football fixtures, live scores, standings, stats and live WebSocket updates.
+version: 1.0.0
+repository: https://github.com/Devara-sarl/goal-api-dart
+homepage: https://goal-api.com
+documentation: https://goal-api.com/documentation
+issue_tracker: https://github.com/Devara-sarl/goal-api-dart/issues
+
+topics:
+  - football
+  - soccer
+  - sports
+  - api
+  - live-scores
+
+environment:
+  sdk: ^3.4.0
+
+dependencies:
+  http: ^1.2.0
+  web_socket_channel: ^3.0.0
+  crypto: ^3.0.3
+
+dev_dependencies:
+  lints: ^4.0.0
+  test: ^1.25.0
