@@ -176,6 +176,19 @@ goal.rateLimit.type;        // 'DAILY' | 'MONTHLY'
 
 ## Live WebSocket updates
 
+> The socket is at `wss://api.goal-api.com/ws`, **not** `/v1/ws`. Only nginx's
+> `location ^~ /ws` carries the `Upgrade` headers; `/v1/ws` is proxied as ordinary HTTP and
+> answers 200 instead of upgrading. The SDK derives the right URL for you.
+>
+> Two services authenticate: the gateway authorises the upgrade from the header or
+> `?wsToken=`, then websocket-service needs an `{"type": "auth", ...}` frame as the very
+> first message. The SDK sends it, and treats `auth_success` as the point the connection is
+> usable.
+>
+> **`subscribe` is capped per plan and the cap can be 0.** `auth_success` reports
+> `maxSubscriptions`; if it is 0 the socket works but no `match_update` will ever arrive.
+> See the known server issue in [`ENDPOINTS.md`](ENDPOINTS.md).
+
 ```dart
 final live = goal.live();
 
@@ -251,6 +264,21 @@ For an endpoint this SDK doesn't wrap yet:
 
 ```dart
 final data = await goal.request('/some/new/endpoint', {'limit': 10});
+```
+
+## Examples
+
+| File | Shows |
+|---|---|
+| [`example/goal_api_example.dart`](example/goal_api_example.dart) | Status, live fixtures, standings, pagination |
+| [`example/live_scores.dart`](example/live_scores.dart) | The live socket: connect, subscribe, print every frame |
+| [`example/webhook_server.dart`](example/webhook_server.dart) | Verifying a webhook against the raw request bytes |
+| [`example/bulk_export.dart`](example/bulk_export.dart) | Walking every page of a collection to CSV |
+
+```bash
+GOAL_API_KEY=...          dart run example/live_scores.dart
+GOAL_WEBHOOK_SECRET=...   dart run example/webhook_server.dart
+GOAL_API_KEY=...          dart run example/bulk_export.dart > countries.csv
 ```
 
 ## Testing
