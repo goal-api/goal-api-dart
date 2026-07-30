@@ -1,0 +1,20 @@
+name: live-api
+
+# Hits the real API. Needs a GOAL_API_KEY secret on the `live-api` environment; the
+# tests skip without it.
+on:
+  schedule:
+    - cron: '32 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    environment: live-api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+      - run: dart pub get
+      - env:
+          GOAL_API_KEY: ${{ secrets.GOAL_API_KEY }}
+        run: dart test

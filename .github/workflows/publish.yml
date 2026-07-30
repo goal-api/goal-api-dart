@@ -1,0 +1,30 @@
+name: publish
+
+# pub.dev checks the tag against the pubspec version itself, so the tag pattern
+# configured under Admin -> Automated publishing must be `v{{version}}`.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Validate without publishing
+        type: boolean
+        default: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pub.dev
+    permissions:
+      contents: read
+      id-token: write   # pub.dev automated publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+      - run: dart pub get
+      - run: dart analyze --fatal-infos
+      - run: dart test
+      - run: dart pub publish --dry-run
+      - if: inputs.dry_run != true
+        run: dart pub publish --force
