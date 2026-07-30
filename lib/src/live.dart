@@ -19,6 +19,11 @@ abstract final class LiveMessageType {
   static const String status = 'status';
   static const String serverShutdown = 'server_shutdown';
   static const String error = 'error';
+
+  // Replies to client requests are named `<request>_response`.
+  static const String subscribeResponse = 'subscribe_response';
+  static const String unsubscribeResponse = 'unsubscribe_response';
+  static const String getSubscriptionsResponse = 'get_subscriptions_response';
 }
 
 /// Live match updates over WebSocket. Reconnects with backoff and re-sends
@@ -31,11 +36,17 @@ abstract final class LiveMessageType {
 /// live.subscribe(fixtureId);
 /// ```
 ///
-/// Auth depends on the platform. Native sends an `Authorization` header on the
-/// handshake. Browsers can't set headers, so pass `useConnectToken: true` and the
-/// client gets a single-use token from `POST /ws/token` first. (The key is still in
-/// the app bundle either way -- proxy through your own backend for anything
-/// public.)
+/// The connection authenticates twice, because two services are involved:
+///
+/// 1. The gateway authorises the HTTP upgrade. Native sends `Authorization: Bearer`;
+///    browsers can't set headers, so pass `useConnectToken: true` and the client gets
+///    a single-use token from `POST /ws/token` for the `?wsToken=` query param.
+/// 2. websocket-service then requires `{"type": "auth", ...}` as the very first frame,
+///    and closes with 4001 if anything else arrives first.
+///
+/// [connect] completes on `auth_success`, not on socket open, so a completed future
+/// means the connection is actually usable. (The key is still in the app bundle either
+/// way, so proxy through your own backend for anything public.)
 class LiveClient {
   LiveClient(
     this._t, {
@@ -44,7 +55,8 @@ class LiveClient {
     this.maxReconnectAttempts,
     this.pingInterval = const Duration(seconds: 30),
     this.useConnectToken = false,
-  }) : _url = url ?? '${_t.baseUrl.replaceFirst(RegExp(r'^http'), 'ws')}/ws';
+    this.authTimeout = const Duration(seconds: 10),
+  }) : _url = url ?? deriveWsUrl(_t.baseUrl);
 
   final Transport _t;
   final String _url;
@@ -57,9 +69,13 @@ class LiveClient {
   /// Use a `?wsToken=` instead of an Authorization header. Required on web.
   final bool useConnectToken;
 
+  /// How long to wait for `auth_success` before giving up.
+  final Duration authTimeout;
+
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _subscription;
   Timer? _pingTimer;
+  bool _authenticated = false;
 
   final _messages = StreamController<Map<String, dynamic>>.broadcast();
   final _subscriptions = <String>{};
@@ -76,13 +92,15 @@ class LiveClient {
   /// The matches this client is subscribed to.
   Set<String> get subscriptions => Set.unmodifiable(_subscriptions);
 
-  bool get connected => _channel != null && !_closedByUser;
+  /// True once authenticated, not merely once the socket is open.
+  bool get connected => _channel != null && !_closedByUser && _authenticated;
 
   Future<LiveClient> connect() async {
     _closedByUser = false;
 
     final Uri uri;
     final Map<String, dynamic> headers;
+    final Map<String, dynamic> authFrame;
     if (useConnectToken) {
       final response = await _t.post('/ws/token', const <String, dynamic>{});
       final token = (response['data'] as Map?)?['token'] as String?;
@@ -92,9 +110,11 @@ class LiveClient {
       }
       uri = Uri.parse('$_url?wsToken=${Uri.encodeQueryComponent(token)}');
       headers = const {};
+      authFrame = {'type': 'auth', 'token': token};
     } else {
       uri = Uri.parse(_url);
       headers = {'Authorization': 'Bearer ${_t.apiKey}'};
+      authFrame = {'type': 'auth', 'apiKey': _t.apiKey};
     }
 
     try {
@@ -108,23 +128,80 @@ class LiveClient {
           cause: error);
     }
 
-    _attempt = 0;
-    _startPing();
+    _authenticated = false;
+    final authed = Completer<Map<String, dynamic>>();
 
     _subscription = _channel!.stream.listen(
-      _handleFrame,
-      onError: (Object error) => _messages.addError(
-        GoalApiConnectionException('WebSocket error: $error', cause: error),
-      ),
-      onDone: _handleDone,
+      (dynamic raw) {
+        final message = _decode(raw);
+        if (message == null) return;
+        if (!authed.isCompleted) {
+          if (message['type'] == 'auth_success') {
+            authed.complete(message);
+          } else if (message['type'] == 'error') {
+            final error = message['error'];
+            final detail = (error is Map ? error['message'] : null) ??
+                message['message'] ??
+                'authentication failed';
+            authed.completeError(AuthenticationException('$detail'));
+            return;
+          }
+        }
+        if (!_messages.isClosed) _messages.add(message);
+      },
+      onError: (Object error) {
+        if (!authed.isCompleted) {
+          authed.completeError(GoalApiConnectionException(
+              'WebSocket error: $error',
+              cause: error));
+        }
+        _messages.addError(
+          GoalApiConnectionException('WebSocket error: $error', cause: error),
+        );
+      },
+      onDone: () {
+        if (!authed.isCompleted) {
+          authed.completeError(GoalApiConnectionException(
+              'WebSocket closed before authenticating'));
+        }
+        _handleDone();
+      },
       cancelOnError: false,
     );
+
+    // Must be the first frame on the wire, or the server closes with 4001.
+    _channel!.sink.add(jsonEncode(authFrame));
+
+    try {
+      await authed.future.timeout(authTimeout);
+    } on TimeoutException {
+      await _channel?.sink.close();
+      throw AuthenticationException('Timed out waiting for auth_success');
+    }
+
+    _authenticated = true;
+    _attempt = 0;
+    _startPing();
 
     for (final matchId in _subscriptions.toList()) {
       _send({'type': 'subscribe', 'resource': 'match', 'matchId': matchId});
     }
 
     return this;
+  }
+
+  Map<String, dynamic>? _decode(dynamic raw) {
+    try {
+      final decoded =
+          jsonDecode(raw is String ? raw : utf8.decode(raw as List<int>));
+      return decoded is Map<String, dynamic> ? decoded : null;
+    } catch (_) {
+      if (!_messages.isClosed) {
+        _messages
+            .addError(GoalApiException('Received malformed WebSocket frame'));
+      }
+      return null;
+    }
   }
 
   /// Fine to call before [connect]; it is sent on open.
@@ -149,6 +226,7 @@ class LiveClient {
       [int code = ws_status.normalClosure,
       String reason = 'client closed']) async {
     _closedByUser = true;
+    _authenticated = false;
     _stopPing();
     await _subscription?.cancel();
     _subscription = null;
@@ -157,23 +235,9 @@ class LiveClient {
     await _messages.close();
   }
 
-  void _handleFrame(dynamic raw) {
-    Map<String, dynamic> message;
-    try {
-      final decoded =
-          jsonDecode(raw is String ? raw : utf8.decode(raw as List<int>));
-      if (decoded is! Map<String, dynamic>) return;
-      message = decoded;
-    } catch (_) {
-      _messages
-          .addError(GoalApiException('Received malformed WebSocket frame'));
-      return;
-    }
-    if (!_messages.isClosed) _messages.add(message);
-  }
-
   void _handleDone() {
     _stopPing();
+    _authenticated = false;
     if (autoReconnect && !_closedByUser) {
       _scheduleReconnect();
     } else if (!_messages.isClosed) {
@@ -227,4 +291,21 @@ class LiveClient {
       });
     });
   }
+}
+
+/// The live socket is served at `/ws` on the host root, not under `/v1`.
+///
+/// nginx routes it with `location ^~ /ws`, the only location carrying the Upgrade
+/// headers. `/v1/ws` falls into the REST location instead and silently answers 200
+/// rather than upgrading, which is a confusing failure because the URL looks right.
+String deriveWsUrl(String baseUrl) {
+  final uri = Uri.parse(baseUrl);
+  return uri
+      .replace(
+        scheme: uri.scheme == 'https' ? 'wss' : 'ws',
+        path: '/ws',
+        query: '',
+      )
+      .toString()
+      .replaceFirst(RegExp(r'\?$'), '');
 }

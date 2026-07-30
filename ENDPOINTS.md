@@ -290,26 +290,82 @@ leagues. Those return `404 STANDINGS_NOT_FOUND` even when the base table has row
 
 ## WebSocket (live matches)
 
-- URL: `wss://api.goal-api.com/v1/ws`
-- Server-side auth: `Authorization: Bearer <API_KEY>` on the handshake.
-- Browser auth: `POST /v1/ws/token` with the API key → `{ data: { token, expiresIn } }`,
-  then connect to `wss://api.goal-api.com/v1/ws?wsToken=<token>`. Single-use, short TTL.
+- URL: `wss://api.goal-api.com/ws`
 
-Client → server:
+  **Not** `/v1/ws`. nginx routes the socket with `location ^~ /ws`, which is the only
+  location carrying the `Upgrade` headers. `/v1/ws` falls into the REST `location /v1/`,
+  which has none, so the request is proxied as ordinary HTTP and answers **200 with a JSON
+  body** instead of upgrading. It looks like a working URL and never connects.
+
+### Two authentication steps
+
+Two services are involved and each authenticates separately.
+
+**1. The gateway authorises the HTTP upgrade.**
+
+| Client | How |
+|---|---|
+| Server-side | `Authorization: Bearer <API_KEY>` header on the handshake |
+| Browser | `?wsToken=<token>` from `POST /v1/ws/token`, since browsers cannot set headers |
+
+**2. websocket-service requires an auth frame as the very first message.**
 
 ```json
-{"type": "ping"}
+{"type": "auth", "apiKey": "<API_KEY>"}
+{"type": "auth", "token": "<wsToken>"}
+```
+
+Anything else first and the connection closes with **4001 `First message must be
+authentication`**. The server replies:
+
+```json
+{"type": "auth_success", "data": {"userId": "...", "plan": "PRO",
+ "maxSubscriptions": 20, "authMethod": "api_key", "features": {...}}}
+```
+
+Treat `auth_success` as the point the connection becomes usable, not the socket open event.
+
+Client to server, after auth:
+
+```json
 {"type": "subscribe",   "resource": "match", "matchId": "..."}
 {"type": "unsubscribe", "resource": "match", "matchId": "..."}
 {"type": "get_subscriptions"}
 {"type": "status"}
+{"type": "ping"}
 ```
 
 `resource` only accepts `"match"`. Client messages are capped at 60/minute
-(`MESSAGE_RATE_LIMIT_EXCEEDED`); concurrent subscriptions are capped by plan.
+(`MESSAGE_RATE_LIMIT_EXCEEDED`).
 
-Server → client: `auth_success`, `match_update`, `pong`, `status`, `server_shutdown`,
-`error`.
+Server to client:
+
+| Type | When |
+|---|---|
+| `auth_success` | After a valid auth frame |
+| `match_update` | A subscribed match changed |
+| `subscribe_response` | Reply to `subscribe` |
+| `unsubscribe_response` | Reply to `unsubscribe` |
+| `get_subscriptions_response` | Reply to `get_subscriptions` |
+| `status` | Reply to `status` |
+| `pong` | Reply to `ping` |
+| `server_shutdown` | The service is going away |
+| `error` | `{type, success: false, error: {code, message, category}}` |
+
+Replies to client requests are named `<request>_response`.
+
+### Subscriptions are capped per plan, and the cap can be zero
+
+`subscribe` is rejected with `SUBSCRIPTION_LIMIT_EXCEEDED` once the connection holds
+`maxSubscriptions` matches. `auth_success` reports the number, so check it before assuming
+updates will arrive.
+
+> **Known server issue.** `websocket-service/src/services/planService.js`
+> `getMaxSubscriptions()` is a hardcoded map of `FREE`/`BASIC`/`PRO`/`ENTERPRISE` with a
+> `|| 0` fallback, and there is no `maxSubscriptions` field in `PlanConfiguration`. Any plan
+> whose name is not one of those four, such as `MEGA_PLAN` or `PRO_PLAN`, gets **0
+> subscriptions**, so live updates are silently unavailable: the socket connects, auth
+> succeeds, and every `subscribe` is refused.
 
 ## Webhooks
 
