@@ -416,6 +416,32 @@ server's configured ceiling when the plan grants `canAccessLiveData`, and to 0 w
 not — so a plan without live access connects and authenticates fine, then has every
 `subscribe` refused.
 
+### Concurrent connections
+
+One API key may hold **5 sockets at once**. Enough for a worker and a dashboard, or a few
+workers sharing a key.
+
+Each connection has its own subscriptions: subscribing on one does not subscribe the
+others, and `get_subscriptions` answers for the connection that asked. A match every
+connection is subscribed to is delivered to every one of them.
+
+The sixth is refused, rather than an existing one being dropped — a process that is working
+should not be cut off because another started. The refusal is an `error` frame followed by
+close code **4029**, chosen to echo HTTP 429:
+
+```json
+{"type": "error", "success": false,
+ "error": {"code": "CONNECTION_LIMIT_EXCEEDED", "message": "Connection limit reached. This API key allows 5 concurrent connections."}}
+```
+
+`IP_CONNECTION_LIMIT_EXCEEDED`, also on 4029, is the separate per-source cap; it counts
+every connection from one address, so it can trip on a shared NAT even when your key is
+well under its own limit.
+
+Close code **4001** stays what it has always been: authentication failed. A 4029 is worth
+retrying with backoff, since a slot frees the moment another connection closes; a 4001 is
+not, until the credentials change.
+
 ## Webhooks
 
 Delivered as `POST` with headers `X-Goal-Signature`, `X-Goal-Event`, `X-Goal-Delivery`.
