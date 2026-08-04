@@ -25,7 +25,7 @@ validates and packs, then stops before uploading.
 1. Publish once by hand (`dart pub publish`) to claim the package name.
 2. On pub.dev go to the package, then Admin, then Automated publishing, and enable
    GitHub Actions:
-   - Repository: `Devara-sarl/goal-api-dart`
+   - Repository: `goal-api/goal-api-dart`
    - Tag pattern: `v{{version}}`
    - Require the `pub.dev` environment.
 
