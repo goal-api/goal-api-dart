@@ -368,18 +368,53 @@ Server to client:
 
 Replies to client requests are named `<request>_response`.
 
+### What a `match_update` carries
+
+The payload is the provider's live shape, **not** the REST fixture shape. Scores are
+strings, and `match_status` is the minute rather than an enum. Decoding it into the type
+you use for `/fixtures` will silently give you empty fields.
+
+```json
+{
+  "id": "cms3w60taj3q9kw06djp31udu",
+  "match_id": "750259",
+  "country_name": "Uzbekistan",
+  "league_name": "Pro League A",
+  "match_date": "2026-08-04",
+  "match_time": "14:00",
+  "match_status": "42",
+  "match_hometeam_name": "Respublika FA",
+  "match_hometeam_score": "0",
+  "match_awayteam_name": "Gazalkent",
+  "match_awayteam_score": "1",
+  "match_live": "1",
+  "goalscorer": [
+    { "time": "45+7", "home_scorer": "Y. Fernandes", "home_assist": "F. Rivera", "score": "1 - 0", "score_info_time": "1st Half" }
+  ],
+  "cards": [
+    { "time": "23", "home_fault": "Jefferson", "card": "yellow card", "score_info_time": "1st Half" }
+  ],
+  "substitutions": {}
+}
+```
+
+Two ids, because there are two id spaces. `id` is the fixture id you subscribed with, the
+one `/fixtures` returns. `match_id` is the provider's, the same value REST exposes as
+`apiId`. Match on `id`.
+
+`goalscorer`, `cards` and `substitutions` hold the events the provider has attached to the
+match, not only what changed in this frame.
+
 ### Subscriptions are capped per plan, and the cap can be zero
 
 `subscribe` is rejected with `SUBSCRIPTION_LIMIT_EXCEEDED` once the connection holds
 `maxSubscriptions` matches. `auth_success` reports the number, so check it before assuming
 updates will arrive.
 
-> **Known server issue.** `websocket-service/src/services/planService.js`
-> `getMaxSubscriptions()` is a hardcoded map of `FREE`/`BASIC`/`PRO`/`ENTERPRISE` with a
-> `|| 0` fallback, and there is no `maxSubscriptions` field in `PlanConfiguration`. Any plan
-> whose name is not one of those four, such as `MEGA_PLAN` or `PRO_PLAN`, gets **0
-> subscriptions**, so live updates are silently unavailable: the socket connects, auth
-> succeeds, and every `subscribe` is refused.
+`FREE` is 0, `BASIC` 5, `PRO` 20, `ENTERPRISE` 1000. Any other plan name falls back to the
+server's configured ceiling when the plan grants `canAccessLiveData`, and to 0 when it does
+not — so a plan without live access connects and authenticates fine, then has every
+`subscribe` refused.
 
 ## Webhooks
 
