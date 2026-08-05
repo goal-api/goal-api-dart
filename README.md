@@ -294,6 +294,22 @@ dart run example/goal_api_example.dart
 The live tests skip themselves without a key. Endpoint-by-endpoint coverage of the API
 lives in `tools/sweep.py` in the SDK workspace.
 
+## Other languages
+
+Four more first-party clients over the same API, with the same resource groups, the same
+retry and pagination behaviour and the same error types. All five release in lockstep, so
+a version number means the same surface everywhere.
+
+| Language | Package | Install |
+|---|---|---|
+| [JavaScript / TypeScript](https://github.com/goal-api/goal-api-js) | [`@goalapi/sdk`](https://www.npmjs.com/package/@goalapi/sdk) | `npm install @goalapi/sdk` |
+| [Python](https://github.com/goal-api/goal-api-python) | [`goal-api`](https://pypi.org/project/goal-api/) | `pip install goal-api` |
+| [Go](https://github.com/goal-api/goal-api-go) | [`goal-api-go`](https://pkg.go.dev/github.com/goal-api/goal-api-go) | `go get github.com/goal-api/goal-api-go` |
+| [PHP](https://github.com/goal-api/goal-api-php) | [`goal-api/sdk`](https://packagist.org/packages/goal-api/sdk) | `composer require goal-api/sdk` |
+
+Each one is its own repository and carries the same [`ENDPOINTS.md`](ENDPOINTS.md), the
+API contract derived from the running service.
+
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
