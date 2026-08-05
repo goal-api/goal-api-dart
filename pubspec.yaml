@@ -22,5 +22,9 @@ dependencies:
   crypto: ^3.0.3
 
 dev_dependencies:
+  # Held at 4 on purpose. lints 5 needs Dart ^3.5.0 and lints 6 needs ^3.8.0, so
+  # bumping it raises the sdk floor above and drops consumers on 3.4 to 3.7 — a
+  # steep price for a linter that never ships to them. Raise both together, or
+  # neither.
   lints: ^4.0.0
   test: ^1.25.0
