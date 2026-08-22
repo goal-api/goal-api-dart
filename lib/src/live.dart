@@ -56,6 +56,7 @@ class LiveClient {
     this.pingInterval = const Duration(seconds: 30),
     this.useConnectToken = false,
     this.authTimeout = const Duration(seconds: 10),
+    this.stableAfter = const Duration(seconds: 60),
   }) : _url = url ?? deriveWsUrl(_t.baseUrl);
 
   final Transport _t;
@@ -72,9 +73,20 @@ class LiveClient {
   /// How long to wait for `auth_success` before giving up.
   final Duration authTimeout;
 
+  /// How long a connection must stay up before the backoff counter resets.
+  ///
+  /// Resetting on `auth_success` alone is not enough: a server that accepts the
+  /// socket and then drops it (plan limit reached, say) produces an endless
+  /// authenticate-drop-retry loop at the *first* backoff step, because every
+  /// cycle looks like a success. Requiring the connection to hold for a while
+  /// means a flapping connection keeps backing off.
+  final Duration stableAfter;
+
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _subscription;
   Timer? _pingTimer;
+  Timer? _reconnectTimer;
+  Timer? _stabilityTimer;
   bool _authenticated = false;
 
   final _messages = StreamController<Map<String, dynamic>>.broadcast();
@@ -123,6 +135,19 @@ class LiveClient {
       _channel = openChannel(uri, headers);
       await _channel!.ready;
     } catch (error) {
+      // A refused upgrade (429 from the rate limiter, 503, a dead network) fails
+      // HERE, before the stream exists — so _handleDone, which is what normally
+      // drives reconnection, is never wired up and never runs. Leaving this as a
+      // bare `throw` meant the backoff below was unreachable on exactly the path
+      // that retries hardest: every caller-driven retry started again from
+      // _attempt 0 with no delay at all. In August that turned a rate limit into
+      // 4,635 requests per second from a single client. Schedule the retry here
+      // too, then rethrow so an awaiting caller still learns it failed.
+      // The handshake failed, so this channel never became usable. Drop it:
+      // awaiting sink.close() on one whose upgrade was refused never completes,
+      // which used to hang close() forever after a failed connect.
+      _channel = null;
+      _scheduleReconnect();
       throw GoalApiConnectionException(
           'Could not open WebSocket to $uri: $error',
           cause: error);
@@ -180,7 +205,10 @@ class LiveClient {
     }
 
     _authenticated = true;
-    _attempt = 0;
+    // NOT `_attempt = 0` — see [stableAfter]. The counter only resets once this
+    // connection has actually survived a while.
+    _stabilityTimer?.cancel();
+    _stabilityTimer = Timer(stableAfter, () => _attempt = 0);
     _startPing();
 
     for (final matchId in _subscriptions.toList()) {
@@ -228,15 +256,28 @@ class LiveClient {
     _closedByUser = true;
     _authenticated = false;
     _stopPing();
+    // A pending retry outlives the socket it was scheduled for; leaving it
+    // armed means close() is followed by a reconnect the caller never asked for.
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _stabilityTimer?.cancel();
+    _stabilityTimer = null;
     await _subscription?.cancel();
     _subscription = null;
-    await _channel?.sink.close(code, reason);
+    // close() only *starts* the closing handshake; a peer that never answers
+    // would otherwise hold this future open indefinitely. Callers of close()
+    // want the local resources released, not a negotiated goodbye.
+    await _channel?.sink
+        .close(code, reason)
+        .timeout(const Duration(seconds: 2), onTimeout: () {});
     _channel = null;
     await _messages.close();
   }
 
   void _handleDone() {
     _stopPing();
+    _stabilityTimer?.cancel();
+    _stabilityTimer = null;
     _authenticated = false;
     if (autoReconnect && !_closedByUser) {
       _scheduleReconnect();
@@ -270,6 +311,13 @@ class LiveClient {
   }
 
   void _scheduleReconnect() {
+    if (!autoReconnect || _closedByUser) return;
+    // One pending attempt at a time. Both the handshake failure in connect() and
+    // _handleDone can land on this, and a client that opened two chains would
+    // double its request rate on every subsequent failure — the opposite of what
+    // backoff is for.
+    if (_reconnectTimer?.isActive ?? false) return;
+
     final max = maxReconnectAttempts;
     if (max != null && _attempt >= max) {
       if (!_messages.isClosed) {
@@ -279,14 +327,17 @@ class LiveClient {
       }
       return;
     }
+    // 1s, 2s, 4s ... capped at 30s, then halved-to-full jitter so a fleet that
+    // was disconnected together doesn't return in lockstep.
     final base = min(1000 * (1 << _attempt), 30000);
     final jittered = (base * (0.5 + Random().nextDouble() / 2)).round();
     _attempt++;
-    Timer(Duration(milliseconds: jittered), () {
+    _reconnectTimer = Timer(Duration(milliseconds: jittered), () {
       if (_closedByUser) return;
+      // connect() schedules the next attempt itself if it fails, so this only
+      // has to surface the error.
       connect().catchError((Object error) {
         if (!_messages.isClosed) _messages.addError(error);
-        _scheduleReconnect();
         return this;
       });
     });

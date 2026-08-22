@@ -143,6 +143,7 @@ class GoalApi {
     int? maxReconnectAttempts,
     Duration pingInterval = const Duration(seconds: 30),
     bool useConnectToken = false,
+    Duration stableAfter = const Duration(seconds: 60),
   }) =>
       LiveClient(
         _t,
@@ -151,6 +152,7 @@ class GoalApi {
         maxReconnectAttempts: maxReconnectAttempts,
         pingInterval: pingInterval,
         useConnectToken: useConnectToken,
+        stableAfter: stableAfter,
       );
 
   /// Releases the HTTP client.
