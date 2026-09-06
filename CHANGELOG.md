@@ -3,7 +3,7 @@
 All notable changes to this package. Versions follow [semver](https://semver.org);
 all five GOAL API SDKs are released together under one version number.
 
-## Unreleased
+## 1.1.0 - 2026-09-06
 
 ### Fixed
 

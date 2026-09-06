@@ -40,9 +40,11 @@ void main() {
     test('retries at all — the refusal path reaches the backoff', () async {
       final (server, hits) = await _refusingServer();
       final goal = _clientFor(server);
-      final live = goal.live(url: 'ws://${server.address.address}:${server.port}/ws');
+      final live =
+          goal.live(url: 'ws://${server.address.address}:${server.port}/ws');
 
-      await expectLater(live.connect(), throwsA(isA<GoalApiConnectionException>()));
+      await expectLater(
+          live.connect(), throwsA(isA<GoalApiConnectionException>()));
       expect(hits, hasLength(1), reason: 'the initial attempt');
 
       // First backoff step is 1s jittered to 0.5-1.0s, second is 2s jittered to
@@ -60,9 +62,11 @@ void main() {
     test('retries are spaced by backoff, not fired in a loop', () async {
       final (server, hits) = await _refusingServer();
       final goal = _clientFor(server);
-      final live = goal.live(url: 'ws://${server.address.address}:${server.port}/ws');
+      final live =
+          goal.live(url: 'ws://${server.address.address}:${server.port}/ws');
 
-      await expectLater(live.connect(), throwsA(isA<GoalApiConnectionException>()));
+      await expectLater(
+          live.connect(), throwsA(isA<GoalApiConnectionException>()));
       await Future<void>.delayed(const Duration(seconds: 5));
       await live.close();
 
@@ -88,7 +92,8 @@ void main() {
     test('only one retry chain is ever pending', () async {
       final (server, hits) = await _refusingServer();
       final goal = _clientFor(server);
-      final live = goal.live(url: 'ws://${server.address.address}:${server.port}/ws');
+      final live =
+          goal.live(url: 'ws://${server.address.address}:${server.port}/ws');
 
       // Three concurrent callers, as a rebuilding UI would produce. Each failure
       // schedules, but the guard must collapse them into a single chain.
@@ -112,9 +117,11 @@ void main() {
     test('close() cancels a pending retry', () async {
       final (server, hits) = await _refusingServer();
       final goal = _clientFor(server);
-      final live = goal.live(url: 'ws://${server.address.address}:${server.port}/ws');
+      final live =
+          goal.live(url: 'ws://${server.address.address}:${server.port}/ws');
 
-      await expectLater(live.connect(), throwsA(isA<GoalApiConnectionException>()));
+      await expectLater(
+          live.connect(), throwsA(isA<GoalApiConnectionException>()));
       await live.close();
       final atClose = hits.length;
 
@@ -134,7 +141,8 @@ void main() {
         autoReconnect: false,
       );
 
-      await expectLater(live.connect(), throwsA(isA<GoalApiConnectionException>()));
+      await expectLater(
+          live.connect(), throwsA(isA<GoalApiConnectionException>()));
       await Future<void>.delayed(const Duration(milliseconds: 2500));
       await live.close();
 
