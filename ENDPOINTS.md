@@ -10,20 +10,6 @@ Single source of truth for all five SDKs. Derived from the live service, not fro
 - WebSocket protocol (`services/websocket-service/src/handlers/messageRouter.js`, `subscriptionHandler.js`)
 - Webhook signing (`services/worker-service/src/services/webhookDeliveryService.js:22-67`)
 
-## Scope
-
-These SDKs cover the **customer data API** and nothing else. Every endpoint here is one a
-paying API customer calls with their key.
-
-The gateway also mounts a control plane for the SaaS itself: `/auth`, `/user`, `/api-keys`,
-`/sessions`, `/plans`, `/subscriptions`, `/webhook-endpoints`, `/admin`, and `/blog`. Those
-belong to the dashboard and the marketing site, most authenticate with a dashboard JWT
-rather than an API key, and none of them are useful to someone building against the API.
-They are deliberately absent, and should stay absent.
-
-The one non-football path included is `POST /v1/ws/token`, because a browser needs it to
-open the live socket without exposing the API key.
-
 ## Transport
 
 | | |
@@ -295,6 +281,29 @@ leagues. Those return `404 STANDINGS_NOT_FOUND` even when the base table has row
 | `videos.byLeague(leagueId, p)` | `GET /videos/league/{leagueId}` | `from` `to` `limit`≤100 `offset` |
 | `videos.byDate(date, p)` | `GET /videos/date/{date}` | `leagueId` `limit`≤100 `offset` |
 
+### news
+
+| Method | Endpoint | Params |
+|---|---|---|
+| `news.list(p)` | `GET /news` | `leagueId` `teamId` `matchId` `from` `to` `limit`≤100 (default 20) `offset` |
+| `news.byMatch(matchId, p)` | `GET /news/match/{matchId}` | `from` `to` `limit`≤100 `offset` |
+| `news.byTeam(teamId, p)` | `GET /news/team/{teamId}` | `from` `to` `limit`≤100 `offset` |
+| `news.byLeague(leagueId, p)` | `GET /news/league/{leagueId}` | `from` `to` `limit`≤100 `offset` |
+| `news.get(id)` | `GET /news/{id}` | — |
+
+`from`/`to` filter on `publishedAt`, and `to` covers the whole of that day. Sort is
+`publishedAt` descending; retention is 30 days.
+
+`teamId`/`leagueId`/`matchId` are in the **same id space** as `/teams`, `/leagues` and
+`/fixtures` — an id taken from an article can be used against those endpoints directly,
+and every `teamId` in the current data resolves. Not guaranteed, though: an article can
+reference a competition outside our fixture coverage, which is why `teamName` and
+`leagueName` travel with it. Any of them may be null.
+
+`news.get` accepts our `id` or the provider's own news key. A single-resource endpoint,
+so it returns `{success, data: {...}}` and **404s** rather than returning an empty
+object.
+
 ### odds / predictions
 
 | Method | Endpoint | Params |
@@ -304,143 +313,26 @@ leagues. Those return `404 STANDINGS_NOT_FOUND` even when the base table has row
 
 ## WebSocket (live matches)
 
-- URL: `wss://api.goal-api.com/ws`
+- URL: `wss://api.goal-api.com/v1/ws`
+- Server-side auth: `Authorization: Bearer <API_KEY>` on the handshake.
+- Browser auth: `POST /v1/ws/token` with the API key → `{ data: { token, expiresIn } }`,
+  then connect to `wss://api.goal-api.com/v1/ws?wsToken=<token>`. Single-use, short TTL.
 
-  **Not** `/v1/ws`. nginx routes the socket with `location ^~ /ws`, which is the only
-  location carrying the `Upgrade` headers. `/v1/ws` falls into the REST `location /v1/`,
-  which has none, so the request is proxied as ordinary HTTP and answers **200 with a JSON
-  body** instead of upgrading. It looks like a working URL and never connects.
-
-### Two authentication steps
-
-Two services are involved and each authenticates separately.
-
-**1. The gateway authorises the HTTP upgrade.**
-
-| Client | How |
-|---|---|
-| Server-side | `Authorization: Bearer <API_KEY>` header on the handshake |
-| Browser | `?wsToken=<token>` from `POST /v1/ws/token`, since browsers cannot set headers |
-
-**2. websocket-service requires an auth frame as the very first message.**
+Client → server:
 
 ```json
-{"type": "auth", "apiKey": "<API_KEY>"}
-{"type": "auth", "token": "<wsToken>"}
-```
-
-Anything else first and the connection closes with **4001 `First message must be
-authentication`**. The server replies:
-
-```json
-{"type": "auth_success", "data": {"userId": "...", "plan": "PRO",
- "maxSubscriptions": 20, "authMethod": "api_key", "features": {...}}}
-```
-
-Treat `auth_success` as the point the connection becomes usable, not the socket open event.
-
-Client to server, after auth:
-
-```json
+{"type": "ping"}
 {"type": "subscribe",   "resource": "match", "matchId": "..."}
 {"type": "unsubscribe", "resource": "match", "matchId": "..."}
 {"type": "get_subscriptions"}
 {"type": "status"}
-{"type": "ping"}
 ```
 
 `resource` only accepts `"match"`. Client messages are capped at 60/minute
-(`MESSAGE_RATE_LIMIT_EXCEEDED`).
+(`MESSAGE_RATE_LIMIT_EXCEEDED`); concurrent subscriptions are capped by plan.
 
-Server to client:
-
-| Type | When |
-|---|---|
-| `auth_success` | After a valid auth frame |
-| `match_update` | A subscribed match changed |
-| `subscribe_response` | Reply to `subscribe` |
-| `unsubscribe_response` | Reply to `unsubscribe` |
-| `get_subscriptions_response` | Reply to `get_subscriptions` |
-| `status` | Reply to `status` |
-| `pong` | Reply to `ping` |
-| `server_shutdown` | The service is going away |
-| `error` | `{type, success: false, error: {code, message, category}}` |
-
-Replies to client requests are named `<request>_response`.
-
-### What a `match_update` carries
-
-The payload is the provider's live shape, **not** the REST fixture shape. Scores are
-strings, and `match_status` is the minute rather than an enum. Decoding it into the type
-you use for `/fixtures` will silently give you empty fields.
-
-```json
-{
-  "id": "cms3w60taj3q9kw06djp31udu",
-  "match_id": "750259",
-  "country_name": "Uzbekistan",
-  "league_name": "Pro League A",
-  "match_date": "2026-08-04",
-  "match_time": "14:00",
-  "match_status": "42",
-  "match_hometeam_name": "Respublika FA",
-  "match_hometeam_score": "0",
-  "match_awayteam_name": "Gazalkent",
-  "match_awayteam_score": "1",
-  "match_live": "1",
-  "goalscorer": [
-    { "time": "45+7", "home_scorer": "Y. Fernandes", "home_assist": "F. Rivera", "score": "1 - 0", "score_info_time": "1st Half" }
-  ],
-  "cards": [
-    { "time": "23", "home_fault": "Jefferson", "card": "yellow card", "score_info_time": "1st Half" }
-  ],
-  "substitutions": {}
-}
-```
-
-Two ids, because there are two id spaces. `id` is the fixture id you subscribed with, the
-one `/fixtures` returns. `match_id` is the provider's, the same value REST exposes as
-`apiId`. Match on `id`.
-
-`goalscorer`, `cards` and `substitutions` hold the events the provider has attached to the
-match, not only what changed in this frame.
-
-### Subscriptions are capped per plan, and the cap can be zero
-
-`subscribe` is rejected with `SUBSCRIPTION_LIMIT_EXCEEDED` once the connection holds
-`maxSubscriptions` matches. `auth_success` reports the number, so check it before assuming
-updates will arrive.
-
-`FREE` is 0, `BASIC` 5, `PRO` 20, `ENTERPRISE` 1000. Any other plan name falls back to the
-server's configured ceiling when the plan grants `canAccessLiveData`, and to 0 when it does
-not — so a plan without live access connects and authenticates fine, then has every
-`subscribe` refused.
-
-### Concurrent connections
-
-One API key may hold **5 sockets at once**. Enough for a worker and a dashboard, or a few
-workers sharing a key.
-
-Each connection has its own subscriptions: subscribing on one does not subscribe the
-others, and `get_subscriptions` answers for the connection that asked. A match every
-connection is subscribed to is delivered to every one of them.
-
-The sixth is refused, rather than an existing one being dropped — a process that is working
-should not be cut off because another started. The refusal is an `error` frame followed by
-close code **4029**, chosen to echo HTTP 429:
-
-```json
-{"type": "error", "success": false,
- "error": {"code": "CONNECTION_LIMIT_EXCEEDED", "message": "Connection limit reached. This API key allows 5 concurrent connections."}}
-```
-
-`IP_CONNECTION_LIMIT_EXCEEDED`, also on 4029, is the separate per-source cap; it counts
-every connection from one address, so it can trip on a shared NAT even when your key is
-well under its own limit.
-
-Close code **4001** stays what it has always been: authentication failed. A 4029 is worth
-retrying with backoff, since a slot frees the moment another connection closes; a 4001 is
-not, until the credentials change.
+Server → client: `auth_success`, `match_update`, `pong`, `status`, `server_shutdown`,
+`error`.
 
 ## Webhooks
 

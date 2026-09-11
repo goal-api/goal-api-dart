@@ -48,6 +48,7 @@ class GoalApi {
         h2h = H2HResource(_t),
         results = ResultsResource(_t),
         videos = VideosResource(_t),
+        news = NewsResource(_t),
         odds = OddsResource(_t),
         predictions = PredictionsResource(_t);
 
@@ -66,6 +67,7 @@ class GoalApi {
   final H2HResource h2h;
   final ResultsResource results;
   final VideosResource videos;
+  final NewsResource news;
   final OddsResource odds;
   final PredictionsResource predictions;
 

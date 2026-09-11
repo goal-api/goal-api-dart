@@ -217,6 +217,27 @@ class VideosResource extends _Resource {
       _t.get('/videos/date/${segment(date)}', params);
 }
 
+/// News articles, newest first.
+///
+/// Takes `leagueId`, `teamId`, `matchId`, `from`, `to`, `limit` (max 100,
+/// default 20) and `offset`. The ids are the news source's and are not
+/// guaranteed to resolve against `/teams` or `/leagues`, so every article also
+/// carries `teamName` and `leagueName`; any of them may be null.
+class NewsResource extends _Resource {
+  const NewsResource(super.t);
+
+  Future<Json> list([Params? params]) => _t.get('/news', params);
+  Future<Json> byMatch(Object matchId, [Params? params]) =>
+      _t.get('/news/match/${segment(matchId)}', params);
+  Future<Json> byTeam(Object teamId, [Params? params]) =>
+      _t.get('/news/team/${segment(teamId)}', params);
+  Future<Json> byLeague(Object leagueId, [Params? params]) =>
+      _t.get('/news/league/${segment(leagueId)}', params);
+
+  /// One article, by our id or the provider's own news key. 404s when absent.
+  Future<Json> get(Object id) => _t.get('/news/${segment(id)}');
+}
+
 /// Takes `bookmaker`, `matchId`, `limit` (max 200, default 50) and `offset`.
 class OddsResource extends _Resource {
   const OddsResource(super.t);

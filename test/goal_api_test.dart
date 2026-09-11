@@ -70,6 +70,29 @@ void main() {
       goal.close();
     });
 
+    test('news.list hits /news and forwards its filters', () async {
+      final recorder = Recorder([
+        jsonResponse({'success': true, 'data': <Object>[]})
+      ]);
+      final goal = clientFor(recorder.client);
+
+      // The ids are the news source's, not ours, so they reach the wire untouched.
+      await goal.news.list({
+        'leagueId': '3',
+        'teamId': '150',
+        'from': '2026-09-01',
+        'limit': 5,
+      });
+
+      final url = recorder.seen.first.url;
+      expect(url.path, '/v1/news');
+      expect(url.queryParameters['leagueId'], '3');
+      expect(url.queryParameters['teamId'], '150');
+      expect(url.queryParameters['from'], '2026-09-01');
+      expect(url.queryParameters['limit'], '5');
+      goal.close();
+    });
+
     test('drops nulls and lowercases booleans', () async {
       final recorder = Recorder([
         jsonResponse({'success': true, 'data': <Object>[]})
