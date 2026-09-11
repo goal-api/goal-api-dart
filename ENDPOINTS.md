@@ -212,6 +212,29 @@ Rate limited by IP at 60/min, with the draft-standard `RateLimit-*` headers rath
 The four betting sub-resources accept either a GOAL fixture id or the provider's
 `matchApiId`.
 
+#### The match clock
+
+Every fixture row carries the clock as five fields (since 2026-09-11; rows last synced
+before that have them as `null`):
+
+| Field | Meaning |
+|---|---|
+| `matchMinute` | The clock as a display string: `"47"`, `"45+"` (first-half stoppage, length not stated), `"90+3"`, `"Half Time"`, `"Finished"`. `""` before kick-off. |
+| `matchElapsed` | The regulation minute as an integer. `45` during first-half stoppage and at half time, `90` during second-half stoppage. `null` when not in play. |
+| `matchExtra` | Stated stoppage minutes past `matchElapsed`: `3` for `"90+3"`. `null` for a bare `"90+"` and outside stoppage. |
+| `matchPeriod` | `NOT_STARTED` `FIRST_HALF` `HALF_TIME` `SECOND_HALF` `EXTRA_TIME` `PENALTIES` `FINISHED`, or `null` when unknown. Inferred from the minute: 1–45 and `45+` are `FIRST_HALF`, 46–90 and `90+` `SECOND_HALF`, above 90 `EXTRA_TIME`. |
+| `clockUpdatedAt` | When the clock was last refreshed. In-play fixtures refresh every few seconds; a `LIVE` row with a `clockUpdatedAt` older than a minute means the feed has stalled. |
+
+`matchLive` is a legacy flag and is **not** a liveness
+signal: it stays `"1"` on matches that finished hours ago. Use `matchStatus` and
+`matchPeriod`. `homeTeamHalftimeScore` / `awayTeamHalftimeScore` are final only once
+`matchPeriod` is past `HALF_TIME`; before that they are provisional (empty or a running `"0"`).
+
+`fixtures.statistics(id, { half })` returns `match.fullTime`, `match.firstHalf` and
+`match.secondHalf`. First-half rows exist for fixtures synced since 2026-09-11; the second
+half only where available (rarely), and is never derived as full minus first.
+`hasStatistics` describes the block(s) returned: with `half` set, that half alone.
+
 ### standings
 
 | Method | Endpoint | Params |
@@ -333,6 +356,16 @@ Client → server:
 
 Server → client: `auth_success`, `match_update`, `pong`, `status`, `server_shutdown`,
 `error`.
+
+A `match_update` carries the raw `match_status` string (which is also the clock:
+`"47"`, `"45+2"`, `"Half Time"`) and, beside it, the same string parsed:
+
+```json
+"clock": { "minute": "45+2", "elapsed": 45, "extra": 2, "period": "FIRST_HALF", "updatedAt": "2026-09-11T18:17:40.512Z" }
+```
+
+`period` uses the same values as the REST `matchPeriod`. Ignore `match_live`, for the
+reason given under fixtures.
 
 ## Webhooks
 
