@@ -3,7 +3,7 @@ import 'transport.dart';
 /// One class per endpoint group.
 ///
 /// Methods return the decoded envelope (`{success, data, pagination}`). Rows stay
-/// as maps rather than models -- they are provider-shaped and change. Accepted
+/// as maps rather than models -- they follow the API's response shapes and change. Accepted
 /// params and limit ceilings: ENDPOINTS.md
 typedef Json = Map<String, dynamic>;
 typedef Params = Map<String, dynamic>;
@@ -121,7 +121,7 @@ class FixturesResource extends _Resource {
 
 /// Every method takes an optional `stage`.
 ///
-/// [home] and [away] 404 for leagues where the provider has no home/away split,
+/// [home] and [away] 404 for leagues with no home/away split,
 /// even when the base table has rows.
 class StandingsResource extends _Resource {
   const StandingsResource(super.t);
@@ -234,7 +234,7 @@ class NewsResource extends _Resource {
   Future<Json> byLeague(Object leagueId, [Params? params]) =>
       _t.get('/news/league/${segment(leagueId)}', params);
 
-  /// One article, by our id or the provider's own news key. 404s when absent.
+  /// One article, by our id or the article's apiId. 404s when absent.
   Future<Json> get(Object id) => _t.get('/news/${segment(id)}');
 }
 
