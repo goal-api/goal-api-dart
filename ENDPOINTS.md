@@ -339,7 +339,7 @@ object.
 - URL: `wss://api.goal-api.com/v1/ws`
 - Server-side auth: `Authorization: Bearer <API_KEY>` on the handshake.
 - Browser auth: `POST /v1/ws/token` with the API key → `{ data: { token, expiresIn } }`,
-  then connect to `wss://api.goal-api.com/v1/ws?wsToken=<token>`. Single-use, short TTL.
+  then connect to `wss://api.goal-api.com/ws?wsToken=<token>`. Single-use, short TTL.
 
 Client → server:
 
