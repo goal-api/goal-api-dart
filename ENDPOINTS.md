@@ -336,7 +336,7 @@ object.
 
 ## WebSocket (live matches)
 
-- URL: `wss://api.goal-api.com/v1/ws`
+- URL: `wss://api.goal-api.com/ws` (not `/v1/ws`, which does not upgrade)
 - Server-side auth: `Authorization: Bearer <API_KEY>` on the handshake.
 - Browser auth: `POST /v1/ws/token` with the API key → `{ data: { token, expiresIn } }`,
   then connect to `wss://api.goal-api.com/ws?wsToken=<token>`. Single-use, short TTL.
